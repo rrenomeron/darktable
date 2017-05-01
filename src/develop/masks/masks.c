@@ -61,6 +61,8 @@ static void _masks_free_form_list(GList *forms)
 
 static dt_masks_form_t *_dup_masks_form(const dt_masks_form_t *form)
 {
+  if (!form) return NULL;
+
   dt_masks_form_t *new_form = malloc(sizeof(struct dt_masks_form_t));
   memcpy(new_form, form, sizeof(struct dt_masks_form_t));
 
