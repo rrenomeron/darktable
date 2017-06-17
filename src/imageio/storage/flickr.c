@@ -132,8 +132,8 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
 
   flickcurl_init();
   ctx->fc = flickcurl_new();
-  flickcurl_set_api_key(ctx->fc, API_KEY);
-  flickcurl_set_shared_secret(ctx->fc, SHARED_SECRET);
+  flickcurl_set_oauth_client_key(ctx->fc, API_KEY);
+  flickcurl_set_oauth_client_secret(ctx->fc, SHARED_SECRET);
   flickcurl_set_error_handler(ctx->fc, _flickr_api_error_handler, ctx);
 // Note there is both an Oauth token AND and Oauth token secret
   if(!ui->user_token)
