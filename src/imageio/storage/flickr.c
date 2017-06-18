@@ -41,6 +41,9 @@ DT_MODULE(1)
 #define API_KEY "1d25b2dfcceba8c55fecb27645c968a3"
 #define SHARED_SECRET "ac66b6c212be6f0c"
 
+// borrowed from facebook.c
+#define MSGCOLOR_RED "#e07f7f"
+
 typedef struct _flickr_api_context_t
 {
   flickcurl *fc;
@@ -122,7 +125,7 @@ static void _flickr_api_error_handler(void *data, const char *message)
 
 static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_data_t *ui)
 {
-  const char *username = NULL;//, *frob;
+//  const char *username = NULL;//, *frob;
   // gchar *token;
   // gchar *secret;
   char *flickr_user_token = NULL;
@@ -136,6 +139,7 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
   flickcurl_set_oauth_client_secret(ctx->fc, SHARED_SECRET);
   flickcurl_set_error_handler(ctx->fc, _flickr_api_error_handler, ctx);
 // Note there is both an Oauth token AND and Oauth token secret
+// TODO: Re-enable this when we get a first authenticaiton working!
   if(!ui->user_token)
   {
   //  TODO: Figure out how to re-use an oauth token from a prior session
@@ -163,27 +167,27 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
   }
   else
   {
-    flickr_user_token = ui->user_token;
-    flickr_user_secret = ui->user_token_secret;
-    // shorthand for "is there a logged in user"?
-    username = flickcurl_get_oauth_username(ctx->fc);
+    // flickr_user_token = ui->user_token;
+    // flickr_user_secret = ui->user_token_secret;
+    // // shorthand for "is there a logged in user"?
+    // username = flickcurl_get_oauth_username(ctx->fc);
   }
 
 
-  if(username)
-  {
-    ui->user_token = flickr_user_token;
-    flickcurl_set_oauth_token(ctx->fc, flickr_user_token);
-    flickcurl_set_oauth_token_secret(ctx->fc, flickr_user_secret);
-    return ctx;
-  }
-  else if(!ctx->error_occured)
+  // if(username)
+  // {
+  //   // ui->user_token = flickr_user_token;
+  //   // flickcurl_set_oauth_token(ctx->fc, flickr_user_token);
+  //   // flickcurl_set_oauth_token_secret(ctx->fc, flickr_user_secret);
+  //   // return ctx;
+  // }
+  /*else*/ if(!ctx->error_occured)
   {
     GError *error = NULL;
     int rc = flickcurl_oauth_create_request_token(ctx->fc, NULL);
     if(rc)
     {
-      dt_print(DT_DEBUG_PWSTORAGE, "[flickr] oauth request token creation failed\n");
+      dt_print(DT_DEBUG_CONTROL, "[flickr] oauth request token creation failed\n");
       return NULL;
     }
     const char *request_token = flickcurl_get_oauth_request_token(ctx->fc);
@@ -204,54 +208,78 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
     text1 = g_strdup(
         _("step 1: a new window or tab of your browser should have been loaded. you have to login into your "
           "flickr account there and authorize darktable to upload photos before continuing."));
-    text2 = g_strdup(_("step 2: click the OK button once you are done."));
+    text2 = g_strdup(_("step 2: when finished, a 9-digit code will appear in your browser "
+        "paste that code below, including the dashes, and click the OK button once you are done."));
 
     GtkWidget *window = dt_ui_main_window(darktable.gui->ui);
-    GtkWidget *flickr_auth_dialog
-        = gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
-                                 GTK_BUTTONS_OK_CANCEL, _("flickr authentication"));
+    GtkDialog *flickr_auth_dialog = GTK_DIALOG(
+        gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION,
+                                 GTK_BUTTONS_OK_CANCEL, _("flickr authentication")));
     gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(flickr_auth_dialog), "%s\n\n%s", text1, text2);
 
+    GtkWidget *entry = gtk_entry_new();
+    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(gtk_label_new(_("Code:"))), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(entry), TRUE, TRUE, 0);
+    GtkWidget *flickrauthdialog_vbox = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(flickr_auth_dialog));
+    gtk_box_pack_end(GTK_BOX(flickrauthdialog_vbox), hbox, TRUE, TRUE, 0);
 
-    result = gtk_dialog_run(GTK_DIALOG(flickr_auth_dialog));
+    gtk_widget_show_all(GTK_WIDGET(flickr_auth_dialog));
 
-    gtk_widget_destroy(flickr_auth_dialog);
-
+    ////////////// wait for the user to enter the verifier code
+    const char *verifier;
+    while(TRUE)
+    {
+      result = gtk_dialog_run(GTK_DIALOG(flickr_auth_dialog));
+      if(result == GTK_RESPONSE_CANCEL)
+      {
+        dt_print(DT_DEBUG_PWSTORAGE, "[flickr] user cancelled the login process\n");
+        return NULL;
+      }
+      verifier = gtk_entry_get_text(GTK_ENTRY(entry));
+      if(verifier == NULL || g_strcmp0(verifier, "") == 0)
+      {
+        gtk_message_dialog_format_secondary_markup(GTK_MESSAGE_DIALOG(flickr_auth_dialog),
+                                                   "%s\n\n%s\n\n<span foreground=\"" MSGCOLOR_RED
+                                                   "\" ><small>%s</small></span>",
+                                                   text1, text2, _("please enter the validation URL"));
+        continue;
+      }
+      break;
+    }
+    dt_print(DT_DEBUG_CONTROL, "[flickr] Request Token: %s\n", request_token);
+    dt_print(DT_DEBUG_CONTROL, "[flickr] Token Secret: %s\n", request_token_secret);
+    dt_print(DT_DEBUG_CONTROL, "[flickr] Verifier: %s\n", verifier);
+    gtk_widget_destroy(GTK_WIDGET(flickr_auth_dialog));
+    flickcurl_set_oauth_request_token(ctx->fc, request_token);
+    flickcurl_set_oauth_request_token_secret(ctx->fc, request_token_secret);
+    rc = flickcurl_oauth_create_access_token(ctx->fc, verifier);
+    if(rc)
+    {
+      return NULL;
+    }
     g_free(text1);
     g_free(text2);
+    const char *token = flickcurl_get_oauth_token(ctx->fc);
+    const char *secret = flickcurl_get_oauth_token_secret(ctx->fc);
 
-    switch(result)
+     // TODO: Handle timeouts errors
+    if(token)
     {
-      case GTK_RESPONSE_OK:
-         flickcurl_set_oauth_request_token(ctx->fc, request_token);
-         flickcurl_set_oauth_request_token_secret(ctx->fc, request_token_secret);
-         char * verifier = NULL; // TODO: get this from the dialog somehow
-         rc = flickcurl_oauth_create_access_token(ctx->fc, verifier);
-         if(rc)
-         {
-           dt_print(DT_DEBUG_PWSTORAGE, "[flickr] oauth access token creation failed.\n");
-           return NULL;
-         }
-         const char *token = flickcurl_get_oauth_token(ctx->fc);
-         const char *secret = flickcurl_get_oauth_token_secret(ctx->fc);
+      flickr_user_token = g_strdup(token);
+      flickr_user_secret = g_strdup(secret);
+    }
+    else
+    {
+      _flickr_api_free(ctx);
+      return NULL;
+    }
+     ui->user_token = g_strdup(flickr_user_token);
+     ui->user_token_secret = g_strdup(flickr_user_secret);
 
-        // TODO: Handle timeouts errors
-       if(token)
-       {
-         flickr_user_token = g_strdup(token);
-         flickr_user_secret = g_strdup(secret);
-       }
-       else
-       {
-         _flickr_api_free(ctx);
-         return NULL;
-       }
-        ui->user_token = g_strdup(flickr_user_token);
-        ui->user_token_secret = g_strdup(flickr_user_secret);
-
-        /* Add creds to pwstorage */
-        // Figure out how to re-use an oauth token across sessions before
-        // re-enabling
+     /* Add creds to pwstorage */
+     // Figure out how to re-use an oauth token across sessions before
+     // re-enabling
 //        GHashTable *table = g_hash_table_new(g_str_hash, g_str_equal);
 //        gchar *username = (gchar *)gtk_entry_get_text(ui->user_entry);
 //
@@ -263,20 +291,13 @@ static _flickr_api_context_t *_flickr_api_authenticate(dt_storage_flickr_gui_dat
 //          dt_print(DT_DEBUG_PWSTORAGE, "[flickr] cannot store username/token\n");
 //        }
 
-        g_free(flickr_user_token);
-        g_free(flickr_user_secret);
+     g_free(flickr_user_token);
+     g_free(flickr_user_secret);
 //        g_hash_table_destroy(table);
-        g_free(auth_url);
+     g_free(auth_url);
 
-        return ctx;
-        break;
-
-      default:
-        dt_print(DT_DEBUG_PWSTORAGE, "[flickr] user cancelled the login process\n");
-        return NULL;
-    }
+     return ctx;
   }
-
   return NULL;
 }
 
